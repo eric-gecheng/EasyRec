@@ -21,8 +21,8 @@ elif tf.__version__.startswith('1.15'):
     ops_dir = os.path.join(ops_dir, 'DeepRec')
   else:
     ops_dir = os.path.join(ops_dir, '1.15')
-else:
-  ops_dir = None
+elif tf.__version__.startswith('2.12'):
+  ops_dir = os.path.join(ops_dir, '2.12')
 
 logging.info('ops_dir is %s' % ops_dir)
 custom_op_path = os.path.join(ops_dir, 'libcustom_ops.so')
@@ -47,24 +47,22 @@ class SeqAugmentOps(Layer):
     self.seq_aug_params = params.get_pb_config()
     self.seq_augment = custom_ops.my_seq_augment
 
-  def build(self, input_shape):
-    assert len(input_shape) >= 2, 'SeqAugmentOps must has at least two inputs'
-    embed_dim = int(input_shape[0][-1])
-    self.mask_emb = self.add_weight(
-        shape=(embed_dim,),
-        initializer='glorot_uniform',
-        trainable=True,
-        name='mask')
-
   def call(self, inputs, training=None, **kwargs):
-    assert isinstance(inputs, (list, tuple))
+    assert isinstance(
+        inputs,
+        (list, tuple)), 'the inputs of SeqAugmentOps must be type of list/tuple'
+    assert len(inputs) >= 2, 'SeqAugmentOps must have at least 2 inputs'
     seq_input, seq_len = inputs[:2]
-
-    x = self.seq_augment(seq_input, seq_len, self.mask_emb,
-                         self.seq_aug_params.crop_rate,
-                         self.seq_aug_params.reorder_rate,
-                         self.seq_aug_params.mask_rate)
-    return x
+    embedding_dim = int(seq_input.shape[-1])
+    with tf.variable_scope(self.name, reuse=self.reuse):
+      mask_emb = tf.get_variable(
+          'mask', (embedding_dim,), dtype=tf.float32, trainable=True)
+    seq_len = tf.to_int32(seq_len)
+    aug_seq, aug_len = self.seq_augment(seq_input, seq_len, mask_emb,
+                                        self.seq_aug_params.crop_rate,
+                                        self.seq_aug_params.reorder_rate,
+                                        self.seq_aug_params.mask_rate)
+    return aug_seq, aug_len
 
 
 class TextNormalize(Layer):
